@@ -201,6 +201,7 @@ class Simulation:
         self.persons: list[Person] = []
         self.houses: list[House] = []
         self._setup_agents()
+        self._apply_extreme_scenario_overrides()   # once, after all agents created
         self._build_social_network()
         self._update_co_adoption()
 
@@ -370,33 +371,69 @@ class Simulation:
         else:
             p.neighbours_meet_and_discuss = min((p.pf(26) - 1) / 6 + cfg.stimulate_social_interaction, 1.0)
 
-        # extreme scenario overrides for savings / information campaigns
-        if cfg.extreme_scenario_testing:
-            if cfg.extreme_scenario_savings == "low":
-                cfg.PV_net_bill_after_adoption = -483.5
-                cfg.savings_heat_pump = 2200.0
-                self.savings_EV_small, self.savings_EV_medium, self.savings_EV_large = 3.3, 3.7, 4.1
-            else:
-                cfg.PV_net_bill_after_adoption = 90.0
-                cfg.savings_heat_pump = 2800.0
-                self.savings_EV_small, self.savings_EV_medium, self.savings_EV_large = 8.4, 10.5, 12.5
-            if cfg.extreme_scenario_information_campaign:
-                cfg.information_campaign_PV_year = 2022
-                cfg.information_campaign_EV_year = 2022
-                cfg.information_campaign_heat_pump_year = 2022
-            else:
-                cfg.information_campaign_PV_year = 2051
-                cfg.information_campaign_EV_year = 2051
-                cfg.information_campaign_heat_pump_year = 2051
+    def _apply_extreme_scenario_overrides(self):
+        """Called once after all agents are created — not inside the per-person loop."""
+        cfg = self.config
+        if not cfg.extreme_scenario_testing:
+            return
+        if cfg.extreme_scenario_savings == "low":
+            cfg.PV_net_bill_after_adoption = -483.5
+            cfg.savings_heat_pump = 2200.0
+            self.savings_EV_small, self.savings_EV_medium, self.savings_EV_large = 3.3, 3.7, 4.1
+        else:
+            cfg.PV_net_bill_after_adoption = 90.0
+            cfg.savings_heat_pump = 2800.0
+            self.savings_EV_small, self.savings_EV_medium, self.savings_EV_large = 8.4, 10.5, 12.5
+        if cfg.extreme_scenario_information_campaign:
+            cfg.information_campaign_PV_year = 2022
+            cfg.information_campaign_EV_year = 2022
+            cfg.information_campaign_heat_pump_year = 2022
+        else:
+            cfg.information_campaign_PV_year = 2051
+            cfg.information_campaign_EV_year = 2051
+            cfg.information_campaign_heat_pump_year = 2051
 
     def _build_social_network(self):
-        """Connect each person to their N nearest neighbours (by list index as proxy)."""
-        n = len(self.persons)
-        k = min(self.config.number_of_neighbours, n - 1)
+        """
+        Assign spatial (x, y) coordinates matching the NetLogo 57×57 toroidal grid
+        (urban core radius 18, suburban ring radius 31, rural = rest), then connect
+        each person to their K nearest neighbours by Euclidean distance.
+        """
+        import math as _math
+
+        cfg = self.config
+        k = min(cfg.number_of_neighbours, len(self.persons) - 1)
+
+        # --- assign coordinates based on region --------------------------------
+        # NetLogo grid: patches in [-38,38]×[-38,38], distance from patch 0,0
+        #   urban:    distance <= 18
+        #   suburban: distance <= 31
+        #   rural:    rest
+        # We draw random (x,y) within the matching zone for each person.
+        rng = random.Random()   # uses global seed already set by caller
+
+        coords = []
+        for p in self.persons:
+            region = str(p.p(2)).strip().lower()
+            for _ in range(500):            # rejection sampling
+                x = rng.uniform(-38, 38)
+                y = rng.uniform(-38, 38)
+                d = _math.hypot(x, y)
+                if region == "urban"    and d <= 18:  break
+                if region == "suburban" and 18 < d <= 31: break
+                if region == "rural"    and d > 31:   break
+            coords.append((x, y))
+
+        # --- connect K nearest by Euclidean distance ---------------------------
+        xs = [c[0] for c in coords]
+        ys = [c[1] for c in coords]
         for i, p in enumerate(self.persons):
-            # nearest by index distance (proxy for spatial proximity)
-            indices = sorted(range(n), key=lambda j: abs(j - i))
-            p.neighbours = [self.persons[j] for j in indices[1:k + 1]]
+            dists = [
+                (_math.hypot(xs[i] - xs[j], ys[i] - ys[j]), j)
+                for j in range(len(self.persons)) if j != i
+            ]
+            dists.sort()
+            p.neighbours = [self.persons[j] for _, j in dists[:k]]
 
     # -----------------------------------------------------------------------
     # Main step
@@ -504,11 +541,13 @@ class Simulation:
         n_HP = sum(1 for h in self.houses if h.heat_pump)
 
         # --- bundle adoption ------------------------------------------------
+        # NetLogo uses random `ask` order — shuffle to match
+        shuffled = self.persons[:]
+        random.shuffle(shuffled)
+
         if cfg.bundle_bonus > 0:
             # PV + EV + heat pump
-            for p in self._eligible_PV(self.persons) if True else []:
-                pass
-            for p in self.persons:
+            for p in shuffled:
                 h = p.house
                 if (self._pv_eligible(p) and self._hp_eligible(p)
                         and p.car and not p.has_ICE and not p.has_HEV and not p.has_EV
@@ -522,7 +561,7 @@ class Simulation:
                     n_HP = sum(1 for h2 in self.houses if h2.heat_pump)
 
             # PV + EV
-            for p in self.persons:
+            for p in shuffled:
                 h = p.house
                 if (self._pv_eligible(p)
                         and p.car and not p.has_ICE and not p.has_HEV and not p.has_EV
@@ -533,7 +572,7 @@ class Simulation:
                     n_PV = sum(1 for h2 in self.houses if h2.PV_solar_panel)
 
             # EV + heat pump
-            for p in self.persons:
+            for p in shuffled:
                 if (p.car and not p.has_ICE and not p.has_HEV and not p.has_EV
                         and self._hp_eligible(p)
                         and self._eval_HP_bundle(p, n_HP, n_houses)
@@ -547,19 +586,19 @@ class Simulation:
         n_PV = sum(1 for h in self.houses if h.PV_solar_panel)
         n_HP = sum(1 for h in self.houses if h.heat_pump)
         n_EV = sum(1 for p in self.persons if p.has_EV)
-        for p in self.persons:
+        for p in shuffled:
             if self._pv_eligible(p):
                 self._eval_PV(p, n_PV, n_houses)
         n_PV = sum(1 for h in self.houses if h.PV_solar_panel)
 
         # --- individual heat pump adoption ----------------------------------
-        for p in self.persons:
+        for p in shuffled:
             if self._hp_eligible(p):
                 self._eval_HP(p, n_PV, n_HP, n_houses)
         n_HP = sum(1 for h in self.houses if h.heat_pump)
 
         # --- fallback: install other heating system -------------------------
-        for p in self.persons:
+        for p in shuffled:
             h = p.house
             if not h.heating_system_other and not h.thermal_solar_panel and not h.heat_pump:
                 h.heating_system_other = True
@@ -567,7 +606,7 @@ class Simulation:
 
         # --- EV adoption ----------------------------------------------------
         n_EV = sum(1 for p in self.persons if p.has_EV)
-        for p in self.persons:
+        for p in shuffled:
             if p.car and not p.has_ICE and not p.has_HEV and not p.has_EV:
                 if p.car_size == "Small car":
                     self._eval_EV_small(p, n_PV, n_HP, n_EV, n_houses)
