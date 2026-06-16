@@ -32,6 +32,7 @@ co-adoption-model/
 ├── co_adoption_model.py   # Core ABM — Config, House, Person, Simulation
 ├── make_figures.py        # Runs policy scenarios and reproduces Figures 2, 3, 5
 ├── requirements.txt       # Python dependencies
+├── LICENSE                # CC BY 4.0 (inherited from original model)
 ├── data/
 │   └── surveyData.csv     # Survey data: 1,469 Swiss respondents (original study)
 └── README.md
@@ -147,6 +148,18 @@ python3 co_adoption_model.py \
   --csv scenario_pv_subsidy.csv \
   --plot
 ```
+
+---
+
+## License
+
+This repository inherits the license of the original model.
+
+**Creative Commons Attribution 4.0 International (CC BY 4.0)**
+
+You are free to share and adapt this material for any purpose, including commercially, as long as you give appropriate credit to the original authors, provide a link to the license, and indicate if changes were made.
+
+See [`LICENSE`](LICENSE) for the full license text, or visit https://creativecommons.org/licenses/by/4.0/
 
 ---
 

@@ -5,7 +5,7 @@ Original NetLogo model v1.1 by the original authors (see CITATION.cff).
 Usage:
     python co_adoption_model.py [--households N] [--runs R] [--years Y] [--csv out.csv]
 
-Requires: pandas, networkx (pip install pandas networkx)
+Requires: pandas (pip install pandas)
 Optional: matplotlib (for plots, pip install matplotlib)
 """
 
@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-import networkx as nx
 
 # ---------------------------------------------------------------------------
 # Default parameter values (mirrors NetLogo sliders / default settings)
