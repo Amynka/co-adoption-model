@@ -24,7 +24,6 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.lines import Line2D
@@ -513,6 +512,7 @@ def figure5(results: list[dict], out_dir: Path):
 # ============================================================
 
 def main():
+    matplotlib.use("Agg")   # non-interactive backend for saving files
     parser = argparse.ArgumentParser(description="Reproduce paper figures")
     parser.add_argument("--scenarios",  type=int, default=256,
                         help="Number of policy scenarios to sample (max 16384)")
