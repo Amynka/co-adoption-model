@@ -199,9 +199,11 @@ class Simulation:
         # persons and houses
         self.persons: list[Person] = []
         self.houses: list[House] = []
+        self._setup_complete = False          # guards co-adoption triggers during init
         self._setup_agents()
         self._apply_extreme_scenario_overrides()   # once, after all agents created
         self._build_social_network()
+        self._setup_complete = True
         self._update_co_adoption()
 
     # -----------------------------------------------------------------------
@@ -423,12 +425,22 @@ class Simulation:
                 if region == "rural"    and d > 31:   break
             coords.append((x, y))
 
-        # --- connect K nearest by Euclidean distance ---------------------------
+        # --- connect K nearest by toroidal Euclidean distance ------------------
+        # NetLogo grid wraps at ±38 in both axes (world width/height = 77 patches).
+        GRID = 76.0   # world-width = max - min = 38 - (-38) = 76
+
+        def _toroidal_dist(x1, y1, x2, y2):
+            dx = abs(x1 - x2)
+            dy = abs(y1 - y2)
+            if dx > GRID / 2: dx = GRID - dx
+            if dy > GRID / 2: dy = GRID - dy
+            return _math.hypot(dx, dy)
+
         xs = [c[0] for c in coords]
         ys = [c[1] for c in coords]
         for i, p in enumerate(self.persons):
             dists = [
-                (_math.hypot(xs[i] - xs[j], ys[i] - ys[j]), j)
+                (_toroidal_dist(xs[i], ys[i], xs[j], ys[j]), j)
                 for j in range(len(self.persons)) if j != i
             ]
             dists.sort()
@@ -530,9 +542,12 @@ class Simulation:
 
         # --- social interaction update --------------------------------------
         for p in self.persons:
-            p.neighbours_meet_and_discuss = min(
-                (p.pf(26) - 1) / 6 + cfg.stimulate_social_interaction, 1.0
-            )
+            if cfg.extreme_scenario_testing:
+                p.neighbours_meet_and_discuss = cfg.extreme_scenario_neighbours_meet_and_discuss
+            else:
+                p.neighbours_meet_and_discuss = min(
+                    (p.pf(26) - 1) / 6 + cfg.stimulate_social_interaction, 1.0
+                )
 
         n_houses = len(self.houses)
         n_EV = sum(1 for p in self.persons if p.has_EV)
@@ -603,16 +618,20 @@ class Simulation:
                 h.heating_system_other = True
                 h.heating_system_other_age = 0
 
-        # --- EV adoption ----------------------------------------------------
+        # --- EV adoption — three sequential passes by car size (matches NetLogo's
+        #     three separate `ask persons with [...car-size = X]` blocks) ----------
         n_EV = sum(1 for p in self.persons if p.has_EV)
         for p in shuffled:
-            if p.car and not p.has_ICE and not p.has_HEV and not p.has_EV:
-                if p.car_size == "Small car":
-                    self._eval_EV_small(p, n_PV, n_HP, n_EV, n_houses)
-                elif p.car_size == "Medium car":
-                    self._eval_EV_medium(p, n_PV, n_HP, n_EV, n_houses)
-                elif p.car_size == "Large car":
-                    self._eval_EV_large(p, n_PV, n_HP, n_EV, n_houses)
+            if p.car and not p.has_ICE and not p.has_HEV and not p.has_EV and p.car_size == "Small car":
+                self._eval_EV_small(p, n_PV, n_HP, n_EV, n_houses)
+                n_EV = sum(1 for q in self.persons if q.has_EV)
+        for p in shuffled:
+            if p.car and not p.has_ICE and not p.has_HEV and not p.has_EV and p.car_size == "Medium car":
+                self._eval_EV_medium(p, n_PV, n_HP, n_EV, n_houses)
+                n_EV = sum(1 for q in self.persons if q.has_EV)
+        for p in shuffled:
+            if p.car and not p.has_ICE and not p.has_HEV and not p.has_EV and p.car_size == "Large car":
+                self._eval_EV_large(p, n_PV, n_HP, n_EV, n_houses)
                 n_EV = sum(1 for q in self.persons if q.has_EV)
 
         self._update_co_adoption()
@@ -809,11 +828,15 @@ class Simulation:
         p.opinion_EV = random.choice(self.opinions_EV) if self.opinions_EV else "NeutralFeedback"
         if self.config.word_of_mouth:
             self._word_of_mouth_EV(p)
-        # co-adoption trigger: re-evaluate PV and HP
-        if self._pv_eligible(p):
-            self._eval_PV(p, n_PV, n_houses)
-        if self._hp_eligible(p):
-            self._eval_HP(p, n_PV, n_HP, n_houses)
+        # co-adoption trigger: re-evaluate PV and HP (guarded like NetLogo setup-complete?)
+        # Use live counts here — NetLogo's count calls are always live.
+        if self._setup_complete:
+            live_n_PV = sum(1 for h in self.houses if h.PV_solar_panel)
+            live_n_HP = sum(1 for h in self.houses if h.heat_pump)
+            if self._pv_eligible(p):
+                self._eval_PV(p, live_n_PV, n_houses)
+            if self._hp_eligible(p):
+                self._eval_HP(p, live_n_PV, live_n_HP, n_houses)
         self.adoption_EV_ids.append(p.id_number)
 
     def _adopt_HP(self, p: Person, n_PV, n_HP, n_houses):
@@ -827,9 +850,12 @@ class Simulation:
         p.opinion_heat_pump = random.choice(self.opinions_HP) if self.opinions_HP else "NeutralFeedback"
         if self.config.word_of_mouth:
             self._word_of_mouth_HP(p)
-        # co-adoption trigger: re-evaluate PV
-        if (not h.historic or self.config.historic_houses_can_install_PV) and h.direct_light and not h.PV_solar_panel and not h.thermal_solar_panel:
-            self._eval_PV(p, n_PV, n_houses)
+        # co-adoption trigger: re-evaluate PV (guarded like NetLogo setup-complete?)
+        # Use live count — NetLogo's count pv-solar-panels is always live.
+        if self._setup_complete:
+            if (not h.historic or self.config.historic_houses_can_install_PV) and h.direct_light and not h.PV_solar_panel and not h.thermal_solar_panel:
+                live_n_PV = sum(1 for hh in self.houses if hh.PV_solar_panel)
+                self._eval_PV(p, live_n_PV, n_houses)
         self.adoption_HP_ids.append(p.id_number)
 
     def _adopt_home_battery(self, p: Person):

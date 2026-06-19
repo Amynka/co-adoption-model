@@ -1,0 +1,72 @@
+name: NetLogo validation
+
+on:
+  push:
+    branches: ["master", "main"]
+  pull_request:
+    branches: ["master", "main"]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── checkout the original NetLogo model (sibling repo on the same commit) ──
+      - name: Checkout original NetLogo model
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/co-adoption-of-low-carbon-household-energy-technologies_v1.0.1
+          path: netlogo_model
+          # If the original model is not on GitHub, fall back to the local copy
+          # bundled as a git submodule or stored in the repo itself.
+
+      # ── Java (needed by NetLogo) ──────────────────────────────────────────────
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # ── Download NetLogo headless jar ─────────────────────────────────────────
+      - name: Download NetLogo 6.4.0
+        run: |
+          wget -q https://github.com/NetLogo/NetLogo/releases/download/6.4.0/NetLogo-6.4.0-64.tgz
+          tar -xzf NetLogo-6.4.0-64.tgz
+          echo "NETLOGO_HOME=$(pwd)/NetLogo-6.4.0" >> $GITHUB_ENV
+
+      # ── Run NetLogo baseline experiment ──────────────────────────────────────
+      - name: Run NetLogo baseline_validation experiment
+        run: |
+          NLOGO_FILE="netlogo_model/code/Co-adoption of low-carbon household energy technologies v1_1.nlogo"
+          java -Xmx512m -cp "$NETLOGO_HOME/lib/app/*:$NETLOGO_HOME/NetLogo.jar" \
+            org.nlogo.headless.Main \
+            --model "$NLOGO_FILE" \
+            --experiment baseline_validation \
+            --table netlogo_baseline.csv \
+            --threads 1
+        env:
+          JAVA_TOOL_OPTIONS: -Djava.awt.headless=true
+
+      - name: Upload NetLogo output
+        uses: actions/upload-artifact@v4
+        with:
+          name: netlogo-baseline
+          path: netlogo_baseline.csv
+
+      # ── Python setup ─────────────────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt pytest
+
+      # ── Run comparison test ───────────────────────────────────────────────────
+      - name: Run NetLogo vs Python comparison test
+        run: pytest tests/test_netlogo_comparison.py -v
+        env:
+          NETLOGO_CSV: ${{ github.workspace }}/netlogo_baseline.csv
