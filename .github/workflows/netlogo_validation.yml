@@ -25,13 +25,12 @@ jobs:
         run: |
           wget -q https://github.com/NetLogo/NetLogo/releases/download/v6.4.0/NetLogo-6.4.0-64.tgz
           tar -xzf NetLogo-6.4.0-64.tgz
-          echo "NETLOGO_HOME=$(pwd)/NetLogo-6.4.0" >> $GITHUB_ENV
+          echo "NETLOGO_HOME=$(pwd)/NetLogo-6.4.0-64" >> $GITHUB_ENV
 
       # ── Run NetLogo baseline experiment ──────────────────────────────────────
       - name: Run NetLogo baseline_validation experiment
         run: |
-          java -Xmx1g -cp "$NETLOGO_HOME/lib/app/*:$NETLOGO_HOME/NetLogo.jar" \
-            org.nlogo.headless.Main \
+          "$NETLOGO_HOME/netlogo-headless.sh" \
             --model "Co-adotpion_v1_1.nlogo" \
             --experiment baseline_validation \
             --table netlogo_baseline.csv \
