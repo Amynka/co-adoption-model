@@ -229,7 +229,6 @@ to setup
   set setup-complete? false ; the set-up starts
 
   ; load data
-  set-current-directory (word "..")
   set person-survey-file csv:from-file "data/surveyData.csv"
 
   ; We make some seperate lists from the data because we need them later
