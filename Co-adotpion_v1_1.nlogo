@@ -2847,6 +2847,97 @@ NetLogo 6.3.0
 @#$#@#$#@
 @#$#@#$#@
 <experiments>
+  <experiment name="baseline_validation" repetitions="5" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="30"/>
+    <metric>count PV-solar-panels</metric>
+    <metric>count EVs</metric>
+    <metric>count heat-pumps</metric>
+    <metric>count home-batteries</metric>
+    <metric>co-adoption-PV-EV-heat-pump</metric>
+    <metric>co-adoption-PV-EV</metric>
+    <metric>co-adoption-PV-heat-pump</metric>
+    <metric>co-adoption-EV-heat-pump</metric>
+    <enumeratedValueSet variable="households">
+      <value value="1469"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="stop-after-x-years">
+      <value value="29"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="number-of-neighbours">
+      <value value="20"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="neighbourhood-effect?">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="word-of-mouth?">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="replacement-time?">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="subsidy-PV">
+      <value value="0"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="subsidy-EV">
+      <value value="0"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="subsidy-heat-pump">
+      <value value="33"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="bundle-bonus">
+      <value value="100"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="savings-EV">
+      <value value="&quot;low&quot;"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="savings-heat-pump">
+      <value value="2090"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="PV-net-bill-after-adoption">
+      <value value="-489"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="PV-self-sufficiency-potential-global">
+      <value value="0.3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="learning-rate-life-cycle-ghg-PV">
+      <value value="0"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="learning-rate-life-cycle-ghg-EV">
+      <value value="0"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="learning-rate-life-cycle-ghg-heat-pump">
+      <value value="0"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="stimulate-social-interaction">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="tenants-can-install">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="historic-houses-can-install-PV">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="range-EV-increase">
+      <value value="20"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="information-campaign-PV-year">
+      <value value="2051"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="information-campaign-EV-year">
+      <value value="2051"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="information-campaign-heat-pump-year">
+      <value value="2051"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="extreme-scenario-testing?">
+      <value value="false"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="sensitivity-analysis?">
+      <value value="false"/>
+    </enumeratedValueSet>
+  </experiment>
   <experiment name="test" repetitions="1" runMetricsEveryStep="true">
     <setup>setup</setup>
     <go>go</go>
