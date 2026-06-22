@@ -23,7 +23,7 @@ jobs:
       # ── Download NetLogo headless jar ─────────────────────────────────────────
       - name: Download NetLogo 6.4.0
         run: |
-          wget -q https://github.com/NetLogo/NetLogo/releases/download/6.4.0/NetLogo-6.4.0-64.tgz
+          wget -q https://github.com/NetLogo/NetLogo/releases/download/v6.4.0/NetLogo-6.4.0-64.tgz
           tar -xzf NetLogo-6.4.0-64.tgz
           echo "NETLOGO_HOME=$(pwd)/NetLogo-6.4.0" >> $GITHUB_ENV
 
