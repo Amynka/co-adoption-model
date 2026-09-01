@@ -7,7 +7,7 @@ Python reimplementation of the agent-based model (ABM) from:
 > *Cell Reports Sustainability*, 1, 100268.
 > https://doi.org/10.1016/j.crsus.2024.100268
 
-The original model was written in NetLogo. This port was created by **Claude Sonnet 4.6** (Anthropic, model ID `claude-sonnet-4-6`), June 2025.
+The original model was written in NetLogo. This port was created by **Claude Sonnet 4.6** (Anthropic, model ID `claude-sonnet-4-6`), June 2026.
 
 ---
 
@@ -192,7 +192,7 @@ If you use this Python port, please cite the original paper:
 
 ## Conversion notes
 
-The NetLogo-to-Python conversion was performed by **Claude Sonnet 4.6** (`claude-sonnet-4-6`, Anthropic) in June 2025. Key translation decisions:
+The NetLogo-to-Python conversion was performed by **Claude Sonnet 4.6** (`claude-sonnet-4-6`, Anthropic) in June 2026. Key translation decisions:
 
 - NetLogo `breeds` → Python classes (`House`, `Person`, `Simulation`)
 - NetLogo `turtles-own` / `patches-own` → dataclass fields
