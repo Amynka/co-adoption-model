@@ -9,7 +9,6 @@ Usage:
 
 import argparse
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 from coadoption import (
@@ -89,7 +88,7 @@ def main():
     for run_idx in range(args.runs):
         seed = (args.seed + run_idx) if args.seed is not None else None
         print(f"\n--- Run {run_idx + 1}/{args.runs} ---")
-        rows = run_once(replace(config), survey, seed=seed)
+        rows = run_once(config, survey, seed=seed)
         all_runs.append(rows)
 
         if args.csv:

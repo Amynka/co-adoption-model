@@ -1,6 +1,7 @@
 """
 Regression test: the refactored model reproduces the original Python port
 (legacy/netlogo_port.py) exactly, year by year, for the same random draws.
+The summaries must be identical, including rounded prices and emissions.
 
 The two implementations draw households differently (the original used
 pandas/numpy sampling, the new model uses model.rng) and the original placed
@@ -103,6 +104,10 @@ def test_matches_legacy_port(scenario, seed, survey, monkeypatch):
     expected = _legacy_rows(legacy.Config(**kwargs), seed, DATA_PATH, monkeypatch)
     actual = _new_rows(Config(**kwargs), seed, survey)
 
+    # exact equality: the refactor keeps every random draw and every floating-point
+    # operation in the original order, so any difference is a behaviour change
     assert len(actual) == len(expected)
     for old, new in zip(expected, actual):
-        assert new == old, f"{scenario}, seed {seed}: first difference in {old['year']}"
+        diff = {k: (old.get(k), new.get(k)) for k in old.keys() | new.keys()
+                if old.get(k) != new.get(k)}
+        assert not diff, f"{scenario}, seed {seed}, year {old['year']} (legacy, new): {diff}"

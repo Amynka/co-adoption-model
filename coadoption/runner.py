@@ -25,7 +25,12 @@ def build_model(config: Config, survey: Union[SurveyData, str, Path, None] = Non
 
 def run_once(config: Config, survey: Union[SurveyData, str, Path, None] = None,
              seed: Optional[int] = None, verbose: bool = True) -> List[Dict]:
-    """Yearly summaries from the initial state to the end of the run"""
+    """Yearly summaries from the initial state to the end of the run.
+
+    ConsumerChoiceModel.run_simulation() returns {'simulation_data': [collect_data() per year],
+    'final_stats': last entry, 'parameters': model_parameters}; CoAdoptionModel.collect_data()
+    returns summary().
+    """
     model = build_model(config, survey, seed)
     rows = model.run_simulation(config.stop_after_x_years)['simulation_data']
     if verbose:

@@ -6,6 +6,9 @@ framework. The behavioural and technological theories it uses live in
 coadoption.theories and can be reused in other models.
 
     from coadoption import CoAdoptionModel, Config, SurveyData
+
+The names in __all__ are the public API. Submodules hold the same classes plus
+internal helpers (names starting with an underscore).
 """
 
 __version__ = "1.0.0"

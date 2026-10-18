@@ -98,6 +98,29 @@ class TestConfig:
         assert allon["PV_self_sufficiency_potential_global"] == pytest.approx(0.5)
         Config(**allon)   # valid Config keywords
 
+    @pytest.mark.parametrize("index, expected", [
+        (0, {"subsidy_PV": 30.0}),
+        (1, {"subsidy_EV": 30.0}),
+        (2, {"subsidy_heat_pump": 30.0}),
+        (3, {"bundle_bonus": 30.0}),
+        (4, {"savings_EV": "high"}),
+        (5, {"savings_heat_pump": 2690.0}),
+        (6, {"PV_net_bill_after_adoption": -415.5}),
+        (7, {"learning_rate_life_cycle_ghg_PV": 0.02}),
+        (8, {"learning_rate_life_cycle_ghg_EV": 0.01}),
+        (9, {"learning_rate_life_cycle_ghg_heat_pump": 0.02}),
+        (10, {"PV_self_sufficiency_potential_global": 0.5, "PV_net_bill_after_adoption": -415.5}),
+        (11, {"tenants_can_install": True}),
+        (12, {"historic_houses_can_install_PV": True}),
+        (13, {"stimulate_social_interaction": 0.14}),
+    ])
+    def test_each_policy_changes_only_its_parameters(self, index, expected):
+        from coadoption.policies import BASELINE
+        vec = [0] * 14
+        vec[index] = 1
+        kw = policy_vector_to_config_kwargs(vec)
+        assert {k: v for k, v in kw.items() if BASELINE[k] != v} == expected
+
     def test_policy_vector_length_checked(self):
         with pytest.raises(ValueError):
             policy_vector_to_config_kwargs([0] * 3)
@@ -165,6 +188,7 @@ class TestInitialisation:
         assert isinstance(baseline_model.scheduler, PhasedScheduler)
         assert all(h.rng is baseline_model.rng for h in baseline_model.households)
 
+    # validate_model() and required_socioeconomic exist in consumer-choice-metamodel 1.0.0
     def test_households_pass_metamodel_validation(self, baseline_model):
         assert ModelValidator.validate_model(baseline_model, required_socioeconomic=["owner"]) == []
 
