@@ -259,6 +259,15 @@ class TestPolicyEffects:
         assert Config().extreme_scenario_testing is False   # config not mutated
 
 
+def test_available_options_need_only_the_household(baseline_model):
+    model = baseline_model
+    for h in model.households:
+        options = model.environment.get_available_options(h.agent_id, {'household': h})
+        names = {tech.name for tech in options}
+        assert ("PV" in names) == model.pv_eligible(h)
+        assert ("HP" in names) == model.hp_eligible(h)
+
+
 def test_per_agent_scheduler_runs(survey):
     from consumer_choice_metamodel import RandomActivationScheduler
     from coadoption import CoAdoptionModel

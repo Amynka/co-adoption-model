@@ -65,8 +65,9 @@ class CoAdoptionEnvironment(Environment):
         self.knowledge_assets.append(asset)
 
     def get_available_options(self, agent_id: str, context: Dict[str, Any]) -> List[PhysicalAsset]:
-        """Technologies the household may adopt now; context['household'] is the Household"""
-        model, household = context['model'], context['household']
+        """Technologies the household may adopt now; context: {'household': Household}"""
+        household = context['household']
+        model = household.model
         options = []
         if model.pv_eligible(household):
             options.append(self.technology("PV"))

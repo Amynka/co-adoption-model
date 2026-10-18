@@ -28,7 +28,15 @@ YEARS = 29
 
 
 class _SeededNetworkRandom:
-    """The `random` module for the legacy code, with a seeded random.Random() for network placement"""
+    """The `random` module for the legacy code, with a seeded random.Random() for network placement.
+
+    The legacy code calls random.Random() once, unseeded, to place households in the
+    network; the new model seeds that generator with f"{seed}:network". Replacing the
+    name `random` inside the legacy module gives both the same placement and leaves
+    the standard library untouched. Every other attribute (choice, randint, sample,
+    shuffle) forwards to the standard `random` module, so both models draw from the
+    same global sequence that random.seed(seed) starts.
+    """
 
     def __init__(self, seed):
         self._seed = seed

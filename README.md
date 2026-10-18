@@ -59,7 +59,7 @@ co-adoption-model/
 ## Architecture
 
 The model implements the abstract classes of the
-[Consumer Choice Metamodel](https://github.com/SiLab-group/cosumer_choice_metamodel):
+[Consumer Choice Metamodel](https://github.com/SiLab-group/consumer_choice_metamodel):
 
 | Metamodel concept | Co-adoption implementation |
 |---|---|
@@ -85,10 +85,14 @@ from coadoption.theories import LinearUtility, UtilityTerm, ExperienceCurve, Wor
 
 ### Using the model from Python
 
+Use the model from a clone of this repository: `coadoption` reads the survey from
+`data/surveyData.csv` in the checkout. `SurveyData.load(path)` and the `--data` option
+of `co_adoption_model.py` and `make_figures.py` load another survey file.
+
 ```python
 from coadoption import CoAdoptionModel, Config, SurveyData, scenario_config
 
-survey = SurveyData.load("data/surveyData.csv")
+survey = SurveyData.load("data/surveyData.csv")   # any survey with the same columns
 model = CoAdoptionModel(survey, seed=42)
 model.initialize_model(Config(households=300, subsidy_PV=30))
 results = model.run_simulation(29)          # yearly summaries, 2022 → 2051

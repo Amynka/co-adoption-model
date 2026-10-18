@@ -10,6 +10,7 @@ from .config import Config
 from .model import CoAdoptionModel
 from .survey import SurveyData
 
+# survey of the repository checkout; pass another path (or --data) for other survey data
 DEFAULT_DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "surveyData.csv"
 
 

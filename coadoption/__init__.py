@@ -8,6 +8,8 @@ coadoption.theories and can be reused in other models.
     from coadoption import CoAdoptionModel, Config, SurveyData
 """
 
+__version__ = "1.0.0"
+
 from .config import Config
 from .survey import SurveyData, Respondent
 from .technologies import Technology, ElectricVehicle, ChoiceSituation, PV, EV, HP
