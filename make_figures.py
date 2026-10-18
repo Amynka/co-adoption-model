@@ -28,190 +28,59 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.lines import Line2D
 
-# --------------------------------------------------------------------------
-# Path to survey data (relative to this script)
-# --------------------------------------------------------------------------
 _DATA_PATH = Path(__file__).resolve().parent / "data" / "surveyData.csv"
 
-# ============================================================
-# Policy definitions
-# ============================================================
-# 14 binary policy dimensions matching the paper.
-# Each entry: (name_shown_in_figure, config_delta_when_ON)
+# The 14 binary policy dimensions are defined in coadoption/policies.py.
 
-POLICY_NAMES = [
-    "Subsidy PV (30%)",
-    "Subsidy EV (30%)",
-    "Subsidy HP (30%)",
-    "Bundle Bonus (30%)",
-    "High savings EV",
-    "High savings HP (+600)",
-    "High savings PV (net bill +73.5)",
-    "GHG standards PV (−2%/yr)",
-    "GHG standards EV (−1%/yr)",
-    "GHG standards HP (−2%/yr)",
-    "Neighbourhood battery (+20% self-suff)",
-    "Tenants can install",
-    "Historic houses can install",
-    "Stimulate social interaction",
-]
-N_POLICIES = len(POLICY_NAMES)  # 14  →  2^14 = 16 384 total
-
-# Short labels for Figure 3 / 4 axes
-POLICY_LABELS_SHORT = [
-    "Subsidy PV (30%)",
-    "Subsidy EV (30%)",
-    "Subsidy HP (30%)",
-    "Bundle Bonus (30%)",
-    "High savings EV",
-    "High savings HP",
-    "High savings PV",
-    "GHG std. PV",
-    "GHG std. EV",
-    "GHG std. HP",
-    "Nbhd battery",
-    "Tenants install",
-    "Historic install",
-    "Social interaction",
-]
+from coadoption import (  # noqa: E402
+    N_POLICIES, POLICY_LABELS_SHORT, POLICY_NAMES, CoAdoptionModel, SurveyData,
+    policy_vector_to_config_kwargs, scenario_config,
+)
 
 
-def policy_vector_to_config_kwargs(vec: tuple[int, ...]) -> dict:
-    """
-    Convert a binary policy vector (length 14) to keyword overrides for Config.
-    Baseline = no policies, low savings, no GHG improvement.
-    """
-    (s_pv, s_ev, s_hp, bundle, sev_hi, shp_hi, spv_hi,
-     ghg_pv, ghg_ev, ghg_hp, nbhd_bat, tenants, historic, social) = vec
+def run_scenario(vec, households: int, survey: SurveyData, seed: Optional[int] = None) -> dict:
+    """Run one policy scenario; yearly adoption curves plus final-state demographics"""
+    cfg = scenario_config(vec, households=households, stop_after_x_years=29)
+    model = CoAdoptionModel(survey, seed=seed)
+    model.initialize_model(cfg)
+    rows = model.run_simulation(cfg.stop_after_x_years)["simulation_data"]
 
-    # --- Baseline parameter values (no interventions, low savings) ----------
-    kw = dict(
-        subsidy_PV=0.0,
-        subsidy_EV=0.0,
-        subsidy_heat_pump=0.0,
-        bundle_bonus=0.0,
-        savings_EV="low",          # 3.3 / 3.7 / 4.1 CHF/100 km
-        savings_heat_pump=2090.0,
-        PV_net_bill_after_adoption=-489.0,
-        PV_self_sufficiency_potential_global=0.3,
-        learning_rate_life_cycle_ghg_PV=0.0,   # no GHG improvement in baseline
-        learning_rate_life_cycle_ghg_EV=0.0,
-        learning_rate_life_cycle_ghg_heat_pump=0.0,
-        tenants_can_install=False,
-        historic_houses_can_install_PV=False,
-        stimulate_social_interaction=0.0,
-        word_of_mouth=True,
-        neighbourhood_effect=True,
-        replacement_time=True,
-    )
+    co_keys = ("co_PV_EV_HP", "co_PV_EV", "co_PV_HP", "co_EV_HP")
+    single_keys = ("co_PV_only", "co_EV_only", "co_HP_only")
 
-    # --- Apply policies -----------------------------------------------------
-    if s_pv:
-        kw["subsidy_PV"] = 30.0
-    if s_ev:
-        kw["subsidy_EV"] = 30.0
-    if s_hp:
-        kw["subsidy_heat_pump"] = 30.0
-    if bundle:
-        kw["bundle_bonus"] = 30.0
-    if sev_hi:
-        kw["savings_EV"] = "high"          # 8.4 / 10.5 / 12.6 CHF/100 km
-    if shp_hi:
-        kw["savings_heat_pump"] = 2090.0 + 600.0
-    if spv_hi:
-        kw["PV_net_bill_after_adoption"] = -489.0 + 73.5   # less negative = better
-    if ghg_pv:
-        kw["learning_rate_life_cycle_ghg_PV"] = 0.02
-    if ghg_ev:
-        kw["learning_rate_life_cycle_ghg_EV"] = 0.01
-    if ghg_hp:
-        kw["learning_rate_life_cycle_ghg_heat_pump"] = 0.02
-    if nbhd_bat:
-        # neighbourhood battery: increases self-sufficiency AND PV savings
-        kw["PV_self_sufficiency_potential_global"] = min(
-            1.0, kw["PV_self_sufficiency_potential_global"] + 0.2
-        )
-        kw["PV_net_bill_after_adoption"] = kw["PV_net_bill_after_adoption"] + 73.5
-    if tenants:
-        kw["tenants_can_install"] = True
-    if historic:
-        kw["historic_houses_can_install_PV"] = True
-    if social:
-        kw["stimulate_social_interaction"] = 0.14   # adds ~0.14 to NMD (0-1 scale)
-
-    return kw
-
-
-# ============================================================
-# Simulation runner (imported inline to avoid circular imports)
-# ============================================================
-
-def _run_scenario(args):
-    """Worker function: (vec, households, data_path_str, seed) → result dict."""
-    vec, households, data_path_str, seed = args
-    # import here so multiprocessing workers get fresh module state
-    from co_adoption_model import Config, Simulation, load_survey
-
-    if seed is not None:
-        random.seed(seed)
-        np.random.seed(seed)
-
-    kw = policy_vector_to_config_kwargs(vec)
-    cfg = Config(households=households, stop_after_x_years=29, **kw)
-    df, op_PV, op_EV, op_HP, car_times = load_survey(Path(data_path_str))
-    sim = Simulation(cfg, df, op_PV, op_EV, op_HP, car_times)
-
-    years, pv, ev, hp, hb = [], [], [], [], []
-    co_all, co_pv_ev, co_pv_hp, co_ev_hp = [], [], [], []
-    single_only = []
-
-    for tick in range(cfg.stop_after_x_years + 1):
-        s = sim.summary()
-        years.append(s["year"])
-        pv.append(s["PV"])
-        ev.append(s["EV"])
-        hp.append(s["HP"])
-        hb.append(s["HB"])
-        co_all.append(s["co_PV_EV_HP"])
-        co_pv_ev.append(s["co_PV_EV"])
-        co_pv_hp.append(s["co_PV_HP"])
-        co_ev_hp.append(s["co_EV_HP"])
-        # co-adopters = own 2 or 3 techs
-        co_total = (s["co_PV_EV_HP"] + s["co_PV_EV"] + s["co_PV_HP"] + s["co_EV_HP"])
-        # single-only = own exactly 1 tech
-        only = s["co_PV_only"] + s["co_EV_only"] + s["co_HP_only"]
-        single_only.append(only)
-        if tick < cfg.stop_after_x_years:
-            sim.go()
-
-    # extract per-person demographics at final state (tick 29)
-    # income: use survey column index 26 (neighboordhood_r2, 1-7 scale) as proxy
-    # ownership: p.owner
+    # per-household demographics at the final state (tick 29); income groups use
+    # survey column neighboordhood_r2 (1-7), which measures how often respondents
+    # meet their neighbours
     income_groups = []
     ownership_groups = []
     co_adopt_status = []
     single_adopt_status = []
-    for p in sim.persons:
-        raw_inc = p.pf(26)  # 1-7 scale
+    for h in model.households:
+        raw_inc = h.respondent.number("neighboordhood_r2")
         if raw_inc <= 2:
             income_groups.append("Low")
         elif raw_inc <= 5:
             income_groups.append("Mid")
         else:
             income_groups.append("High")
-        ownership_groups.append("Owner" if p.owner else "Tenant")
+        ownership_groups.append("Owner" if h.attributes.owner else "Tenant")
         # co-adopt: owns 2+ technologies
-        n_tech = int(p.house.PV_solar_panel) + int(p.has_EV) + int(p.house.heat_pump)
+        n_tech = sum(h.owns(family) for family in ("PV", "EV", "HP"))
         co_adopt_status.append(n_tech >= 2)
         single_adopt_status.append(n_tech == 1)
 
     return {
-        "vec": vec,
-        "years": years,
-        "PV": pv, "EV": ev, "HP": hp, "HB": hb,
-        "co_all": co_all, "co_pv_ev": co_pv_ev,
-        "co_pv_hp": co_pv_hp, "co_ev_hp": co_ev_hp,
-        "single_only": single_only,
+        "vec": tuple(vec),
+        "years": [s["year"] for s in rows],
+        "PV": [s["PV"] for s in rows], "EV": [s["EV"] for s in rows],
+        "HP": [s["HP"] for s in rows], "HB": [s["HB"] for s in rows],
+        "co_all": [s["co_PV_EV_HP"] for s in rows],
+        "co_pv_ev": [s["co_PV_EV"] for s in rows],
+        "co_pv_hp": [s["co_PV_HP"] for s in rows],
+        "co_ev_hp": [s["co_EV_HP"] for s in rows],
+        # co-adopters own 2 or 3 techs; single-only own exactly 1
+        "co_total": [sum(s[k] for k in co_keys) for s in rows],
+        "single_only": [sum(s[k] for k in single_keys) for s in rows],
         # final-state demographics
         "income_groups": income_groups,
         "ownership_groups": ownership_groups,
@@ -220,9 +89,11 @@ def _run_scenario(args):
     }
 
 
-# ============================================================
-# Figure helpers
-# ============================================================
+def _run_scenario(args):
+    """Worker function: (vec, households, data_path_str, seed) → result dict."""
+    vec, households, data_path_str, seed = args
+    return run_scenario(vec, households, SurveyData.load(Path(data_path_str)), seed)
+
 
 def _cell_reports_style():
     """Apply a clean, Cell Reports–style matplotlib rcParams."""
@@ -241,8 +112,6 @@ def _cell_reports_style():
         "figure.dpi": 150,
     })
 
-
-# ---- Figure 2 ---------------------------------------------------------------
 
 def figure2(results: list[dict], baseline_idx: int, out_dir: Path):
     """
@@ -317,8 +186,6 @@ def figure2(results: list[dict], baseline_idx: int, out_dir: Path):
     plt.close(fig)
 
 
-# ---- Figure 3 ---------------------------------------------------------------
-
 def figure3(results: list[dict], out_dir: Path):
     """
     Slope chart of policy effects in 2030 vs 2050 (linear regression coefficients).
@@ -387,8 +254,6 @@ def figure3(results: list[dict], out_dir: Path):
     plt.close(fig)
 
 
-# ---- Figure 5 ---------------------------------------------------------------
-
 def figure5(results: list[dict], out_dir: Path):
     """
     Stacked area charts by income group and home ownership.
@@ -399,7 +264,7 @@ def figure5(results: list[dict], out_dir: Path):
     n_agents = len(results[0]["income_groups"])
     n_results = len(results)
 
-    # --- aggregate across all simulations ------------------------------------
+    # Aggregate across all simulations
     # For each year and each demographic group, average co-/single-/no-adoption share
 
     income_cats  = ["High", "Mid", "Low"]
@@ -457,7 +322,7 @@ def figure5(results: list[dict], out_dir: Path):
     for ri, (status_key, row_label) in enumerate(
         [("co", "Co-adoption"), ("single", "Single adoption"), ("no", "No adoption")]
     ):
-        # --- Income / fraction of total (col 0) ---
+        # Income / fraction of total (col 0)
         ax = axes[ri, 0]
         shares = _shares_by_group(results, "income_groups", income_cats, status_key)
         ax.stackplot(years, shares.T, labels=income_cats, colors=inc_colors, alpha=0.85)
@@ -467,7 +332,7 @@ def figure5(results: list[dict], out_dir: Path):
             ax.set_title("Income group\nFraction of total", fontsize=8.5)
             ax.legend(loc="upper left", fontsize=6.5)
 
-        # --- Income / within group (col 1) ---
+        # Income / within group (col 1)
         ax = axes[ri, 1]
         shares = _within_shares_by_group(results, "income_groups", income_cats, status_key)
         for ci, (cat, col) in enumerate(zip(income_cats, inc_colors)):
@@ -476,7 +341,7 @@ def figure5(results: list[dict], out_dir: Path):
         if ri == 0:
             ax.set_title("Within group", fontsize=8.5)
 
-        # --- Ownership / fraction of total (col 2) ---
+        # Ownership / fraction of total (col 2)
         ax = axes[ri, 2]
         shares = _shares_by_group(results, "ownership_groups", own_cats, status_key)
         ax.stackplot(years, shares.T, labels=own_cats, colors=own_colors, alpha=0.85)
@@ -485,7 +350,7 @@ def figure5(results: list[dict], out_dir: Path):
             ax.set_title("Home ownership\nFraction of total", fontsize=8.5)
             ax.legend(loc="upper left", fontsize=6.5)
 
-        # --- Ownership / within group (col 3) ---
+        # Ownership / within group (col 3)
         ax = axes[ri, 3]
         shares = _within_shares_by_group(results, "ownership_groups", own_cats, status_key)
         for ci, (cat, col) in enumerate(zip(own_cats, own_colors)):
@@ -507,10 +372,6 @@ def figure5(results: list[dict], out_dir: Path):
     plt.close(fig)
 
 
-# ============================================================
-# Main
-# ============================================================
-
 def main():
     matplotlib.use("Agg")   # non-interactive backend for saving files
     parser = argparse.ArgumentParser(description="Reproduce paper figures")
@@ -531,7 +392,7 @@ def main():
     out_dir = Path(args.out)
     out_dir.mkdir(exist_ok=True)
 
-    # --- load or generate results ------------------------------------------
+    # Load or generate results
     if args.cache and Path(args.cache).exists():
         print(f"Loading cached results from {args.cache} …")
         with open(args.cache, "rb") as f:
@@ -579,7 +440,7 @@ def main():
     )
     print(f"Baseline index: {baseline_idx}")
 
-    # --- generate figures ---------------------------------------------------
+    # Generate figures
     print("Generating Figure 2 …")
     figure2(results, baseline_idx, out_dir)
 

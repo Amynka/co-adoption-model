@@ -16,20 +16,14 @@ In CI the path is set via the NETLOGO_CSV environment variable.
 """
 
 import os
-import random
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from co_adoption_model import Config, Simulation, load_survey
-
-# ---------------------------------------------------------------------------
-# Paths
-# ---------------------------------------------------------------------------
+from coadoption import CoAdoptionModel, Config, SurveyData
 
 DATA_PATH    = Path(__file__).resolve().parent.parent / "data" / "surveyData.csv"
 NETLOGO_CSV  = Path(os.environ.get("NETLOGO_CSV", "netlogo_baseline.csv"))
@@ -37,10 +31,6 @@ N_REPS       = 5
 N_HOUSEHOLDS = 1469
 TOLERANCE    = 0.10   # ±10% of total households = ±147 agents
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _baseline_config():
     """Exact parameters used in the NetLogo baseline_validation experiment."""
@@ -75,21 +65,18 @@ def _baseline_config():
 
 def _run_python_replicates(n_reps: int):
     """Run n_reps Python simulations, return dict of lists of (tick→count)."""
-    survey_df, op_PV, op_EV, op_HP, car_times = load_survey(DATA_PATH)
+    survey = SurveyData.load(DATA_PATH)
     records = []
     for rep in range(n_reps):
-        random.seed(rep * 1000)
-        np.random.seed(rep * 1000)
         cfg = _baseline_config()
-        sim = Simulation(cfg, survey_df, op_PV, op_EV, op_HP, car_times)
-        for tick in range(cfg.stop_after_x_years + 1):
-            s = sim.summary()
+        model = CoAdoptionModel(survey, seed=rep * 1000)
+        model.initialize_model(cfg)
+        rows = model.run_simulation(cfg.stop_after_x_years)["simulation_data"]
+        for tick, s in enumerate(rows):
             records.append({
                 "rep": rep, "tick": tick, "year": s["year"],
                 "PV": s["PV"], "EV": s["EV"], "HP": s["HP"],
             })
-            if tick < cfg.stop_after_x_years:
-                sim.go()
     return pd.DataFrame(records)
 
 
@@ -125,10 +112,6 @@ def _parse_netlogo_csv(path: Path) -> pd.DataFrame:
     return df
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
 @pytest.fixture(scope="module")
 def netlogo_df():
     if not NETLOGO_CSV.exists():
@@ -140,10 +123,6 @@ def netlogo_df():
 def python_df():
     return _run_python_replicates(N_REPS)
 
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 class TestNetLogoPythonComparison:
 
@@ -231,7 +210,7 @@ class TestNetLogoPythonComparison:
         )
 
     def test_print_comparison_summary(self, netlogo_df, python_df, capsys):
-        """Print a side-by-side table (always passes — for human inspection)."""
+        """Print a side-by-side table for inspection."""
         print("\n── NetLogo vs Python adoption comparison ──")
         print(f"{'Year':<6} {'Metric':<6}  {'NetLogo':>10}  {'Python':>10}  {'Diff':>8}  {'Diff%':>7}")
         print("-" * 55)

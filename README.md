@@ -29,14 +29,76 @@ Each year agents update adoption decisions based on falling prices, improving EV
 
 ```
 co-adoption-model/
-├── co_adoption_model.py   # Core ABM — Config, House, Person, Simulation
-├── make_figures.py        # Runs policy scenarios and reproduces Figures 2, 3, 5
-├── requirements.txt       # Python dependencies
-├── LICENSE                # CC BY 4.0 (inherited from original model)
+├── coadoption/                 # The model, built on consumer_choice_metamodel
+│   ├── theories/               # Reusable theories (independent of this model)
+│   │   ├── choice.py           #   linear utility with individual part-worths + logit
+│   │   ├── social.py           #   peer effect, affective word of mouth
+│   │   ├── learning.py         #   experience curves, linear trends
+│   │   ├── lifecycle.py        #   durable goods and replacement timing
+│   │   └── network.py          #   spatial k-nearest-neighbour network on a torus
+│   ├── config.py               # Config (NetLogo sliders)
+│   ├── survey.py               # SurveyData / Respondent: survey columns by name
+│   ├── technologies.py         # PV, heat pump, EV assets and their utility functions
+│   ├── household.py            # Household agent, attributes, choice module
+│   ├── environment.py          # Market environment, information campaigns
+│   ├── factory.py              # Builds households and technologies from survey + Config
+│   ├── model.py                # CoAdoptionModel and its NetLogo-order schedule
+│   ├── policies.py             # The 14 policy levers of the scenario analysis
+│   └── runner.py               # run_once, save_csv, plot_results
+├── co_adoption_model.py        # Command-line entry point
+├── make_figures.py             # Runs policy scenarios and reproduces Figures 2, 3, 5
+├── legacy/netlogo_port.py      # Original line-by-line port, kept as a regression reference
+├── tests/                      # Unit, regression (vs legacy) and NetLogo comparison tests
+├── requirements.txt            # Python dependencies
+├── LICENSE                     # CC BY 4.0 (inherited from original model)
 ├── data/
-│   └── surveyData.csv     # Survey data: 1,469 Swiss respondents (original study)
+│   └── surveyData.csv          # Survey data: 1,469 Swiss respondents (original study)
 └── README.md
 ```
+
+## Architecture
+
+The model implements the abstract classes of the
+[Consumer Choice Metamodel](https://github.com/SiLab-group/cosumer_choice_metamodel):
+
+| Metamodel concept | Co-adoption implementation |
+|---|---|
+| `ConsumerChoiceModel` | `CoAdoptionModel` — seeded `rng`, `PhasedScheduler` that follows the NetLogo `go` order |
+| `ConsumerAgent` / `AgentAttributes` | `Household` / `HouseholdAttributes` (one survey respondent and their `House`) |
+| `ChoiceModule` | `HouseholdChoiceModule` — binary logit with the respondent's own coefficients and an adoption threshold |
+| `PhysicalAsset` | `Technology`, `ElectricVehicle` (PV, heat pump, small / medium / large EV) |
+| `KnowledgeAsset` | `InformationCampaign` |
+| `ExogenousProcess` | `ExperienceCurve` (prices, life-cycle GHG), `LinearTrend` (EV range) |
+| `Network` | `SpatialKNNNetwork` |
+| `RulesOfInteraction` | `WordOfMouth` |
+| `ModelComponentFactory` | `SurveyHouseholdFactory` |
+| `EventBus` | adoption events trigger word of mouth, battery purchase and co-adoption re-evaluation |
+
+Each technology's utility is a list of `UtilityTerm`s (coefficient column × attribute level,
+tagged with an `EvaluationDimension`), so a new technology or a different survey only needs a
+new term list. The theories in `coadoption/theories/` do not depend on this model and can be
+imported by other models:
+
+```python
+from coadoption.theories import LinearUtility, UtilityTerm, ExperienceCurve, WordOfMouth
+```
+
+### Using the model from Python
+
+```python
+from coadoption import CoAdoptionModel, Config, SurveyData, scenario_config
+
+survey = SurveyData.load("data/surveyData.csv")
+model = CoAdoptionModel(survey, seed=42)
+model.initialize_model(Config(households=300, subsidy_PV=30))
+results = model.run_simulation(29)          # yearly summaries, 2022 → 2051
+print(results["final_stats"])
+
+# a scenario from the paper's 14 policy levers
+cfg = scenario_config([1, 0, 0, 1] + [0] * 10, households=300)
+```
+
+The seed determines the whole run, including the social network.
 
 The survey data (`surveyData.csv`, 1,469 real Swiss respondents) is included in this repository:
 
@@ -151,6 +213,20 @@ python3 co_adoption_model.py \
 
 ---
 
+## Tests
+
+```bash
+pip install -r requirements.txt pytest
+pytest tests/
+```
+
+- `tests/test_theories.py` — the reusable theories
+- `tests/test_model.py` — model behaviour
+- `tests/test_legacy_equivalence.py` — the refactored model reproduces `legacy/netlogo_port.py` year by year for the same random draws
+- `tests/test_netlogo_comparison.py` — compares with NetLogo BehaviorSpace output (needs `NETLOGO_CSV`)
+
+---
+
 ## License
 
 This repository inherits the license of the original model.
@@ -199,4 +275,8 @@ The NetLogo-to-Python conversion was performed by **Claude Sonnet 4.6** (`claude
 - NetLogo `link-neighbors` social network → each `Person` holds a `neighbours` list built from K-nearest agents by survey index order
 - NetLogo `rnd` / `csv` extensions → `random` / `pandas`
 - NetLogo GUI sliders → `Config` dataclass with CLI overrides via `argparse`
-- All 14 policy dimensions from the paper are implemented as binary toggles in `make_figures.py`
+- All 14 policy dimensions from the paper are implemented as binary toggles in `coadoption/policies.py`
+
+The code was later restructured onto the Consumer Choice Metamodel framework (see
+*Architecture*). The original port is kept unchanged in `legacy/netlogo_port.py`, and
+`tests/test_legacy_equivalence.py` checks that the restructured model gives identical results.
