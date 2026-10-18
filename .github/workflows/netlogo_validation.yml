@@ -31,7 +31,7 @@ jobs:
       - name: Run NetLogo baseline_validation experiment
         run: |
           "$NETLOGO_HOME/netlogo-headless.sh" \
-            --model "Co-adotpion_v1_1.nlogo" \
+            --model "Co-adoption_v1_1.nlogo" \
             --experiment baseline_validation \
             --table netlogo_baseline.csv \
             --threads 1
