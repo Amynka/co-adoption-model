@@ -139,6 +139,13 @@ class TestDataLoading:
     def test_car_times_are_populated(self, survey):
         assert len(survey.car_purchase_frequencies) > 0
 
+    def test_missing_columns_named_in_error(self, tmp_path):
+        from coadoption import SurveyData
+        path = tmp_path / "survey.csv"
+        path.write_text("respondentID,PVWoMowners\n1,PositiveFeedback\n")
+        with pytest.raises(ValueError, match="EVWoMowners, HPWoMowners, CarPurchaseFrequency"):
+            SurveyData.load(path)
+
     def test_respondent_access_by_name(self, survey):
         r = survey.respondents(survey.frame.head(1))[0]
         assert r.number("respondentID") == float(survey.frame["respondentID"].iloc[0])

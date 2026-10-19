@@ -67,6 +67,10 @@ class SurveyData:
     def load(cls, path: Union[str, Path]) -> "SurveyData":
         frame = pd.read_csv(path)
         columns = list(frame.columns)
+        required = list(OPINION_COLUMNS.values()) + ["CarPurchaseFrequency"]
+        missing = [c for c in required if c not in columns]
+        if missing:
+            raise ValueError(f"survey {path} lacks columns: {', '.join(missing)}")
         raw = frame.values.tolist()
 
         def answers(column: str) -> List[Any]:
