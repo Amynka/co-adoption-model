@@ -1,97 +1,81 @@
 """
-Tests for co_adoption_model.py
+Tests for the coadoption package (model behaviour).
 
 Run with:
     pytest tests/
 """
 
-import math
-import random
-import sys
-from pathlib import Path
-
-import numpy as np
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from consumer_choice_metamodel import ModelValidator, PhasedScheduler
 
-from co_adoption_model import (
-    Config, House, Person, Simulation,
-    load_survey,
-    _parse_car_replacement, _heating_age, _safe_int,
+from coadoption import (
+    EV, HP, PV, Config, House, Household, N_POLICIES, POLICY_NAMES,
+    policy_vector_to_config_kwargs,
 )
+from coadoption.factory import SurveyHouseholdFactory, _safe_int
 
-# ---------------------------------------------------------------------------
-# Shared fixtures
-# ---------------------------------------------------------------------------
-
-DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "surveyData.csv"
 N_AGENTS = 50   # small enough to be fast
 
-
-@pytest.fixture(scope="module")
-def survey_data():
-    df, op_PV, op_EV, op_HP, car_times = load_survey(DATA_PATH)
-    return df, op_PV, op_EV, op_HP, car_times
+BASELINE = dict(
+    households=N_AGENTS,
+    subsidy_PV=0, subsidy_EV=0, subsidy_heat_pump=0,
+    bundle_bonus=0,
+    savings_EV="low",
+    tenants_can_install=False,
+    historic_houses_can_install_PV=False,
+    stimulate_social_interaction=0.0,
+    learning_rate_life_cycle_ghg_PV=0.0,
+    learning_rate_life_cycle_ghg_EV=0.0,
+    learning_rate_life_cycle_ghg_heat_pump=0.0,
+    PV_self_sufficiency_potential_global=0.3,
+    stop_after_x_years=5,
+)
 
 
 @pytest.fixture
-def baseline_sim(survey_data):
-    """Simulation with no policies, fixed seed."""
-    random.seed(0)
-    np.random.seed(0)
-    df, op_PV, op_EV, op_HP, car_times = survey_data
-    cfg = Config(
-        households=N_AGENTS,
-        subsidy_PV=0, subsidy_EV=0, subsidy_heat_pump=0,
-        bundle_bonus=0,
-        savings_EV="low",
-        tenants_can_install=False,
-        historic_houses_can_install_PV=False,
-        stimulate_social_interaction=0.0,
-        learning_rate_life_cycle_ghg_PV=0.0,
-        learning_rate_life_cycle_ghg_EV=0.0,
-        learning_rate_life_cycle_ghg_heat_pump=0.0,
-        PV_self_sufficiency_potential_global=0.3,
-        stop_after_x_years=5,
-    )
-    return Simulation(cfg, df, op_PV, op_EV, op_HP, car_times)
+def baseline_model(make_model):
+    """Model with no policies, fixed seed."""
+    return make_model(seed=0, **BASELINE)
 
 
-# ---------------------------------------------------------------------------
-# 1. Utility function tests
-# ---------------------------------------------------------------------------
+def _run(make_model, seed, years, **config):
+    model = make_model(seed=seed, households=N_AGENTS, stop_after_x_years=years, **config)
+    model.run_simulation(years)
+    return model
 
-class TestUtilities:
 
-    def test_parse_car_replacement_known_values(self):
-        assert _parse_car_replacement("every 12 years or when needed", []) == 12
-        assert _parse_car_replacement("every 8 years", []) == 8
-        assert _parse_car_replacement("every 4 years", []) == 4
-        assert _parse_car_replacement("every year", []) == 1
+class TestFactoryHelpers:
 
-    def test_parse_car_replacement_fallback(self):
-        result = _parse_car_replacement("unknown", ["every 8 years"] * 10)
-        assert result in (1, 4, 8, 12)
+    def _factory(self, survey, **config):
+        import random
+        f = SurveyHouseholdFactory(Config(**config), survey.car_purchase_frequencies)
+        f.rng = random.Random(0)
+        return f
+
+    def test_car_replacement_known_values(self, survey):
+        f = self._factory(survey)
+        assert f._car_replacement_time("every 12 years or when needed") == 12
+        assert f._car_replacement_time("every 8 years") == 8
+        assert f._car_replacement_time("every 4 years") == 4
+        assert f._car_replacement_time("every year") == 1
+
+    def test_car_replacement_fallback(self, survey):
+        assert self._factory(survey)._car_replacement_time("unknown") in (1, 4, 8, 12)
 
     def test_safe_int(self):
         assert _safe_int("2015") == 2015
         assert _safe_int(2015) == 2015
+        assert _safe_int("2015.0") == 2015
         assert _safe_int("not a number") == 0
         assert _safe_int(None) == 0
 
-    def test_heating_age_known_ranges(self):
-        age = _heating_age("2019 or later", 25)
-        assert 1 <= age <= 2
-        age = _heating_age("2010-2019", 25)
-        assert 3 <= age <= 12
-        age = _heating_age("I don't know", 25)
-        assert 0 <= age <= 25
+    def test_heating_age_known_ranges(self, survey):
+        f = self._factory(survey)
+        assert 1 <= f._heating_age("2019 or later") <= 2
+        assert 3 <= f._heating_age("2010-2019") <= 12
+        assert 0 <= f._heating_age("I don't know") <= 25
 
-
-# ---------------------------------------------------------------------------
-# 2. Config tests
-# ---------------------------------------------------------------------------
 
 class TestConfig:
 
@@ -103,218 +87,224 @@ class TestConfig:
         assert cfg.word_of_mouth is True
         assert cfg.neighbourhood_effect is True
 
-    def test_savings_ev_options(self):
-        for level in ("low", "medium", "high"):
-            cfg = Config(savings_EV=level)
-            assert cfg.savings_EV == level
+    def test_policy_vector(self):
+        assert N_POLICIES == len(POLICY_NAMES) == 14
+        base = policy_vector_to_config_kwargs([0] * 14)
+        assert base["subsidy_PV"] == 0.0 and base["tenants_can_install"] is False
+        allon = policy_vector_to_config_kwargs([1] * 14)
+        assert allon["subsidy_PV"] == 30.0
+        # high PV savings and the neighbourhood battery both raise the net bill
+        assert allon["PV_net_bill_after_adoption"] == -489.0 + 73.5 + 73.5
+        assert allon["PV_self_sufficiency_potential_global"] == pytest.approx(0.5)
+        Config(**allon)   # valid Config keywords
 
+    @pytest.mark.parametrize("index, expected", [
+        (0, {"subsidy_PV": 30.0}),
+        (1, {"subsidy_EV": 30.0}),
+        (2, {"subsidy_heat_pump": 30.0}),
+        (3, {"bundle_bonus": 30.0}),
+        (4, {"savings_EV": "high"}),
+        (5, {"savings_heat_pump": 2690.0}),
+        (6, {"PV_net_bill_after_adoption": -415.5}),
+        (7, {"learning_rate_life_cycle_ghg_PV": 0.02}),
+        (8, {"learning_rate_life_cycle_ghg_EV": 0.01}),
+        (9, {"learning_rate_life_cycle_ghg_heat_pump": 0.02}),
+        (10, {"PV_self_sufficiency_potential_global": 0.5, "PV_net_bill_after_adoption": -415.5}),
+        (11, {"tenants_can_install": True}),
+        (12, {"historic_houses_can_install_PV": True}),
+        (13, {"stimulate_social_interaction": 0.14}),
+    ])
+    def test_each_policy_changes_only_its_parameters(self, index, expected):
+        from coadoption.policies import BASELINE
+        vec = [0] * 14
+        vec[index] = 1
+        kw = policy_vector_to_config_kwargs(vec)
+        assert {k: v for k, v in kw.items() if BASELINE[k] != v} == expected
 
-# ---------------------------------------------------------------------------
-# 3. Data loading tests
-# ---------------------------------------------------------------------------
+    def test_policy_vector_length_checked(self):
+        with pytest.raises(ValueError):
+            policy_vector_to_config_kwargs([0] * 3)
+
 
 class TestDataLoading:
 
-    def test_survey_loads(self, survey_data):
-        df, op_PV, op_EV, op_HP, car_times = survey_data
-        assert len(df) == 1469   # pandas reads all data rows (header excluded by default)
-        assert df.shape[1] == 137
+    def test_survey_loads(self, survey):
+        assert len(survey) == 1469
+        assert survey.frame.shape[1] == 137
 
-    def test_opinions_are_valid_strings(self, survey_data):
-        _, op_PV, op_EV, op_HP, _ = survey_data
-        valid = {"PositiveFeedback", "NegativeFeedback", "MixedFeedback", "NeutralFeedback"}
-        for op in op_PV:
-            assert str(op) in valid or True   # opinions may include other values from survey
+    def test_opinion_pools_populated(self, survey):
+        for family in (PV, EV, HP):
+            assert len(survey.opinions[family]) > 0
 
-    def test_car_times_are_populated(self, survey_data):
-        _, _, _, _, car_times = survey_data
-        assert len(car_times) > 0
+    def test_car_times_are_populated(self, survey):
+        assert len(survey.car_purchase_frequencies) > 0
 
+    def test_missing_columns_named_in_error(self, tmp_path):
+        from coadoption import SurveyData
+        path = tmp_path / "survey.csv"
+        path.write_text("respondentID,PVWoMowners\n1,PositiveFeedback\n")
+        with pytest.raises(ValueError, match="EVWoMowners, HPWoMowners, CarPurchaseFrequency"):
+            SurveyData.load(path)
 
-# ---------------------------------------------------------------------------
-# 4. Simulation initialisation tests
-# ---------------------------------------------------------------------------
-
-class TestSimulationInit:
-
-    def test_correct_number_of_agents(self, baseline_sim):
-        assert len(baseline_sim.persons) == N_AGENTS
-        assert len(baseline_sim.houses) == N_AGENTS
-
-    def test_each_person_has_a_house(self, baseline_sim):
-        for p in baseline_sim.persons:
-            assert p.house is not None
-            assert isinstance(p.house, House)
-
-    def test_social_network_built(self, baseline_sim):
-        k = baseline_sim.config.number_of_neighbours
-        for p in baseline_sim.persons:
-            assert len(p.neighbours) == min(k, N_AGENTS - 1)
-            assert p not in p.neighbours   # person is not their own neighbour
-
-    def test_social_network_no_duplicates(self, baseline_sim):
-        for p in baseline_sim.persons:
-            assert len(p.neighbours) == len(set(id(n) for n in p.neighbours))
-
-    def test_initial_adoption_counts_non_negative(self, baseline_sim):
-        assert baseline_sim.count_PV() >= 0
-        assert baseline_sim.count_EV() >= 0
-        assert baseline_sim.count_HP() >= 0
-
-    def test_initial_adoption_counts_within_bounds(self, baseline_sim):
-        n = N_AGENTS
-        assert baseline_sim.count_PV() <= n
-        assert baseline_sim.count_EV() <= n
-        assert baseline_sim.count_HP() <= n
-
-    def test_initial_co_adoption_consistent(self, baseline_sim):
-        sim = baseline_sim
-        # co-adoption subsets cannot exceed single-technology counts
-        assert sim.co_adoption_PV_EV_HP <= min(sim.count_PV(), sim.count_EV(), sim.count_HP())
-        assert sim.co_adoption_PV_EV <= min(sim.count_PV(), sim.count_EV())
-
-    def test_regions_assigned(self, baseline_sim):
-        for h in baseline_sim.houses:
-            assert h.region in ("urban", "suburban", "rural", "Urban", "Suburban", "Rural")
+    def test_respondent_access_by_name(self, survey):
+        r = survey.respondents(survey.frame.head(1))[0]
+        assert r.number("respondentID") == float(survey.frame["respondentID"].iloc[0])
+        assert r.text("AreaType") in ("urban", "suburban", "rural")
+        assert r.number("PVIntercept") == float(survey.frame["PVIntercept"].iloc[0])
 
 
-# ---------------------------------------------------------------------------
-# 5. Simulation step tests
-# ---------------------------------------------------------------------------
+class TestInitialisation:
 
-class TestSimulationStep:
+    def test_correct_number_of_agents(self, baseline_model):
+        assert len(baseline_model.households) == N_AGENTS
+        assert baseline_model.agents is baseline_model.households
 
-    def test_tick_increments(self, baseline_sim):
-        t0 = baseline_sim.tick
-        baseline_sim.go()
-        assert baseline_sim.tick == t0 + 1
+    def test_each_household_has_a_house(self, baseline_model):
+        for h in baseline_model.households:
+            assert isinstance(h, Household)
+            assert isinstance(h.house, House)
 
-    def test_pv_adoption_never_decreases(self, survey_data):
-        """PV panels, once installed, cannot be removed."""
-        random.seed(1); np.random.seed(1)
-        df, op_PV, op_EV, op_HP, car_times = survey_data
-        cfg = Config(households=N_AGENTS, stop_after_x_years=10)
-        sim = Simulation(cfg, df, op_PV, op_EV, op_HP, car_times)
-        prev = sim.count_PV()
+    def test_social_network_built(self, baseline_model):
+        k = baseline_model.config.number_of_neighbours
+        network = baseline_model.environment.network
+        for h in baseline_model.households:
+            neighbours = network.get_neighbors(h.agent_id)
+            assert len(neighbours) == min(k, N_AGENTS - 1)
+            assert h.agent_id not in neighbours
+            assert len(neighbours) == len(set(neighbours))
+
+    def test_initial_adoption_counts_within_bounds(self, baseline_model):
+        for family in (PV, EV, HP):
+            assert 0 <= baseline_model.count(family) <= N_AGENTS
+
+    def test_live_counts_match_households(self, baseline_model):
+        for family in (PV, EV, HP):
+            assert baseline_model.count(family) == sum(
+                h.owns(family) for h in baseline_model.households)
+
+    def test_initial_co_adoption_consistent(self, baseline_model):
+        m = baseline_model
+        assert m.co_adoption["co_PV_EV_HP"] <= min(m.count(PV), m.count(EV), m.count(HP))
+        assert m.co_adoption["co_PV_EV"] <= min(m.count(PV), m.count(EV))
+
+    def test_regions_assigned(self, baseline_model):
+        for h in baseline_model.households:
+            assert h.house.region in ("urban", "suburban", "rural")
+
+    def test_netlogo_schedule_is_default(self, baseline_model):
+        assert isinstance(baseline_model.scheduler, PhasedScheduler)
+        assert all(h.rng is baseline_model.rng for h in baseline_model.households)
+
+    # validate_model() and required_socioeconomic exist in consumer-choice-metamodel 1.0.0
+    def test_households_pass_metamodel_validation(self, baseline_model):
+        assert ModelValidator.validate_model(baseline_model, required_socioeconomic=["owner"]) == []
+
+
+class TestSteps:
+
+    def test_tick_increments(self, baseline_model):
+        baseline_model.step()
+        assert baseline_model.current_time == 1
+        assert baseline_model.summary()["year"] == 2023
+
+    @pytest.mark.parametrize("family", [PV, HP])
+    def test_adoption_never_decreases(self, make_model, family):
+        model = make_model(seed=1, households=N_AGENTS)
+        prev = model.count(family)
         for _ in range(10):
-            sim.go()
-            assert sim.count_PV() >= prev
-            prev = sim.count_PV()
+            model.step()
+            assert model.count(family) >= prev
+            prev = model.count(family)
 
-    def test_hp_adoption_never_decreases(self, survey_data):
-        """Heat pumps, once installed, cannot be removed."""
-        random.seed(2); np.random.seed(2)
-        df, op_PV, op_EV, op_HP, car_times = survey_data
-        cfg = Config(households=N_AGENTS, stop_after_x_years=10)
-        sim = Simulation(cfg, df, op_PV, op_EV, op_HP, car_times)
-        prev = sim.count_HP()
-        for _ in range(10):
-            sim.go()
-            assert sim.count_HP() >= prev
-            prev = sim.count_HP()
-
-    def test_adoption_counts_within_bounds_after_steps(self, survey_data):
-        random.seed(3); np.random.seed(3)
-        df, op_PV, op_EV, op_HP, car_times = survey_data
-        cfg = Config(households=N_AGENTS, stop_after_x_years=5)
-        sim = Simulation(cfg, df, op_PV, op_EV, op_HP, car_times)
+    def test_live_counts_stay_consistent(self, make_model):
+        model = make_model(seed=3, households=N_AGENTS)
         for _ in range(5):
-            sim.go()
-            assert 0 <= sim.count_PV() <= N_AGENTS
-            assert 0 <= sim.count_EV() <= N_AGENTS
-            assert 0 <= sim.count_HP() <= N_AGENTS
+            model.step()
+            for family in (PV, EV, HP):
+                assert model.count(family) == sum(h.owns(family) for h in model.households)
 
-    def test_prices_decrease_over_time(self, survey_data):
-        """Technology prices should fall each tick (learning curve)."""
-        random.seed(4); np.random.seed(4)
-        df, op_PV, op_EV, op_HP, car_times = survey_data
-        cfg = Config(households=N_AGENTS, stop_after_x_years=5,
-                     subsidy_PV=0, subsidy_EV=0, subsidy_heat_pump=0)
-        sim = Simulation(cfg, df, op_PV, op_EV, op_HP, car_times)
-        p0 = sim.price_PV
-        sim.go()
-        assert sim.price_PV <= p0
+    def test_prices_decrease_over_time(self, make_model):
+        model = make_model(seed=4, households=N_AGENTS, subsidy_PV=0)
+        p0 = model.environment.technology(PV).net_price
+        model.step()
+        assert model.environment.technology(PV).net_price <= p0
 
-    def test_ev_range_increases_over_time(self, survey_data):
-        random.seed(5); np.random.seed(5)
-        df, op_PV, op_EV, op_HP, car_times = survey_data
-        cfg = Config(households=N_AGENTS, stop_after_x_years=5, range_EV_increase=20)
-        sim = Simulation(cfg, df, op_PV, op_EV, op_HP, car_times)
-        r0 = sim.range_EV_small
-        sim.go()
-        assert sim.range_EV_small > r0
+    def test_ev_range_increases_and_is_capped(self, make_model):
+        model = make_model(seed=5, households=N_AGENTS, range_EV_increase=100, range_EV_max=700)
+        ev = model.environment.technology("EV_small")
+        r0 = ev.range.value
+        model.step()
+        assert ev.range.value > r0
+        for _ in range(28):
+            model.step()
+        assert ev.range.value <= 700
+        assert model.environment.technology("EV_large").range.value <= 700
 
-    def test_ev_range_capped_at_max(self, survey_data):
-        random.seed(6); np.random.seed(6)
-        df, op_PV, op_EV, op_HP, car_times = survey_data
-        cfg = Config(households=N_AGENTS, stop_after_x_years=29,
-                     range_EV_increase=100, range_EV_max=700)
-        sim = Simulation(cfg, df, op_PV, op_EV, op_HP, car_times)
-        for _ in range(29):
-            sim.go()
-        assert sim.range_EV_small <= 700
-        assert sim.range_EV_large <= 700
+    def test_adoption_events_recorded(self, make_model):
+        model = make_model(seed=6, households=N_AGENTS, subsidy_PV=60, subsidy_heat_pump=60)
+        events = []
+        model.event_bus.subscribe("*", events.append)
+        for _ in range(5):
+            model.step()
+        adopted = [e for e in events if e.event_type.startswith("adopted:")]
+        assert all(e.timestamp is not None for e in adopted)
+        assert len(model.environment.communications) == len(adopted)
 
-
-# ---------------------------------------------------------------------------
-# 6. Policy effect tests
-# ---------------------------------------------------------------------------
 
 class TestPolicyEffects:
 
-    def _run(self, survey_data, cfg, seed=42):
-        random.seed(seed)
-        np.random.seed(seed)
-        df, op_PV, op_EV, op_HP, car_times = survey_data
-        sim = Simulation(cfg, df, op_PV, op_EV, op_HP, car_times)
-        for _ in range(cfg.stop_after_x_years):
-            sim.go()
-        return sim
+    def test_tenants_policy_increases_pv(self, make_model):
+        no = _run(make_model, 10, 10, tenants_can_install=False)
+        yes = _run(make_model, 10, 10, tenants_can_install=True)
+        assert yes.count(PV) >= no.count(PV)
 
-    def test_tenants_policy_increases_pv(self, survey_data):
-        """Allowing tenants to install should increase or maintain PV adoption."""
-        cfg_no  = Config(households=N_AGENTS, stop_after_x_years=10,
-                         tenants_can_install=False)
-        cfg_yes = Config(households=N_AGENTS, stop_after_x_years=10,
-                         tenants_can_install=True)
-        sim_no  = self._run(survey_data, cfg_no,  seed=10)
-        sim_yes = self._run(survey_data, cfg_yes, seed=10)
-        assert sim_yes.count_PV() >= sim_no.count_PV()
+    def test_subsidy_increases_or_maintains_adoption(self, make_model):
+        no = _run(make_model, 20, 10, subsidy_PV=0)
+        sub = _run(make_model, 20, 10, subsidy_PV=30)
+        assert sub.count(PV) >= no.count(PV)
 
-    def test_subsidy_increases_or_maintains_adoption(self, survey_data):
-        """A 30% subsidy should not decrease adoption vs no subsidy."""
-        cfg_no  = Config(households=N_AGENTS, stop_after_x_years=10, subsidy_PV=0)
-        cfg_sub = Config(households=N_AGENTS, stop_after_x_years=10, subsidy_PV=30)
-        sim_no  = self._run(survey_data, cfg_no,  seed=20)
-        sim_sub = self._run(survey_data, cfg_sub, seed=20)
-        assert sim_sub.count_PV() >= sim_no.count_PV()
+    def test_same_seed_same_run(self, make_model):
+        """The whole run, network included, is determined by the seed."""
+        a = make_model(seed=99, households=N_AGENTS).run_simulation(5)
+        b = make_model(seed=99, households=N_AGENTS).run_simulation(5)
+        assert a["simulation_data"] == b["simulation_data"]
 
-    def test_determinism_with_same_seed(self, survey_data):
-        """Same seed should produce nearly identical results.
-        Allows ±2 tolerance because pandas df.sample() may draw from a
-        separate internal RNG that is not fully reset by np.random.seed().
-        """
-        cfg = Config(households=N_AGENTS, stop_after_x_years=5)
-        s1 = self._run(survey_data, cfg, seed=99)
-        s2 = self._run(survey_data, cfg, seed=99)
-        assert abs(s1.count_PV() - s2.count_PV()) <= 2
-        assert abs(s1.count_EV() - s2.count_EV()) <= 2
-        assert abs(s1.count_HP() - s2.count_HP()) <= 2
-
-    def test_summary_keys_present(self, survey_data):
-        cfg = Config(households=N_AGENTS, stop_after_x_years=3)
-        sim = self._run(survey_data, cfg, seed=77)
-        s = sim.summary()
+    def test_summary_keys_present(self, make_model):
+        s = _run(make_model, 77, 3).summary()
         for key in ("year", "PV", "EV", "HP", "HB",
                     "co_PV_EV_HP", "co_PV_EV", "co_PV_HP", "co_EV_HP"):
             assert key in s
 
-    def test_year_advances_correctly(self, survey_data):
-        cfg = Config(households=N_AGENTS, stop_after_x_years=5)
-        random.seed(0); np.random.seed(0)
-        df, op_PV, op_EV, op_HP, car_times = survey_data
-        sim = Simulation(cfg, df, op_PV, op_EV, op_HP, car_times)
-        assert sim.summary()["year"] == 2022
-        for expected_year in range(2023, 2028):
-            sim.go()
-            assert sim.summary()["year"] == expected_year
+    def test_run_simulation_reports_every_year(self, make_model):
+        model = make_model(seed=0, households=N_AGENTS)
+        rows = model.run_simulation(5)["simulation_data"]
+        assert [r["year"] for r in rows] == list(range(2022, 2028))
+
+    def test_extreme_scenario_fixes_prices(self, make_model):
+        model = make_model(seed=0, households=N_AGENTS, extreme_scenario_testing=True,
+                           extreme_scenario_prices="low", extreme_scenario_EV_range=650)
+        model.run_simulation(3)
+        env = model.environment
+        assert env.technology(PV).net_price == 5000.0
+        assert env.technology("EV_medium").range.value == 650
+        assert Config().extreme_scenario_testing is False   # config not mutated
+
+
+def test_available_options_need_only_the_household(baseline_model):
+    model = baseline_model
+    for h in model.households:
+        options = model.environment.get_available_options(h.agent_id, {'household': h})
+        names = {tech.name for tech in options}
+        assert ("PV" in names) == model.pv_eligible(h)
+        assert ("HP" in names) == model.hp_eligible(h)
+
+
+def test_per_agent_scheduler_runs(survey):
+    from consumer_choice_metamodel import RandomActivationScheduler
+    from coadoption import CoAdoptionModel
+
+    model = CoAdoptionModel(survey, seed=1, scheduler=RandomActivationScheduler())
+    model.initialize_model(Config(households=N_AGENTS))
+    model.run_simulation(3)
+    for family in (PV, EV, HP):
+        assert model.count(family) == sum(h.owns(family) for h in model.households)
